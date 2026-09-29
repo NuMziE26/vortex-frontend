@@ -1,10 +1,10 @@
 "use client";
 
-import { useMemo } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Footer } from "@/components/Footer";
 import { Nav } from "@/components/Nav";
 import { useLiveIntents } from "@/hooks/useLiveIntents";
-import { computeAnalytics, getStatusDistributionEntries } from "@/lib/analytics";
+import { computeAnalytics, getStatusDistributionEntries, type AnalyticsResult } from "@/lib/analytics";
 import { CHAINS } from "@/lib/marketData";
 
 const formatUsd = (value: number) => new Intl.NumberFormat("en-US", {
@@ -106,11 +106,74 @@ function StatusBreakdown({ counts }: { counts: ReturnType<typeof getStatusDistri
   );
 }
 
+/**
+ * Drives analytics from a Web Worker when available, falling back to a
+ * synchronous recompute on the main thread (SSR, tests, old browsers).
+ * The worker keeps an incremental aggregator alive and streams snapshots
+ * back, so the main thread only ever renders precomputed results.
+ */
+function useAnalyticsWorker(intents: Parameters<typeof computeAnalytics>[0]) {
+  const [snapshot, setSnapshot] = useState<AnalyticsResult | null>(null);
+  const workerRef = useRef<Worker | null>(null);
+  const initializedRef = useRef(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof Worker === "undefined") {
+      return;
+    }
+
+    let worker: Worker;
+    try {
+      worker = new Worker(new URL("../../lib/analytics/worker.ts", import.meta.url), { type: "module" });
+    } catch {
+      return;
+    }
+
+    workerRef.current = worker;
+    worker.onmessage = (event: MessageEvent<{ type: string; snapshot?: AnalyticsResult }>) => {
+      if (event.data?.type === "snapshot" && event.data.snapshot) {
+        setSnapshot(event.data.snapshot);
+      }
+    };
+
+    return () => {
+      worker.terminate();
+      workerRef.current = null;
+      initializedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const worker = workerRef.current;
+    if (!worker) {
+      return;
+    }
+
+    if (!initializedRef.current) {
+      initializedRef.current = true;
+      worker.postMessage({ type: "init", intents });
+    } else {
+      worker.postMessage({ type: "apply", delta: { type: "replace", intents } });
+    }
+  }, [intents]);
+
+  return snapshot;
+}
+
 export default function AnalyticsPageClient() {
   const { intents, isLoading, error } = useLiveIntents();
 
-  const analytics = useMemo(() => computeAnalytics(intents), [intents]);
-  const statusEntries = useMemo(() => getStatusDistributionEntries(analytics.statusCounts), [analytics.statusCounts]);
+  const workerSnapshot = useAnalyticsWorker(intents);
+  const fallbackAnalytics = useMemo(
+    () => (workerSnapshot ? null : computeAnalytics(intents)),
+    [workerSnapshot, intents],
+  );
+  const analytics = workerSnapshot ?? fallbackAnalytics!;
+  const deferredAnalytics = useDeferredValue(analytics);
+  const statusEntries = useMemo(
+    () => getStatusDistributionEntries(deferredAnalytics.statusCounts),
+    [deferredAnalytics.statusCounts],
+  );
 
   if (isLoading && intents.length === 0) {
     return (
@@ -175,95 +238,16 @@ export default function AnalyticsPageClient() {
         <div className="grid gap-4 md:grid-cols-4">
           <div className="card p-4">
             <div className="eyebrow">Total Volume</div>
-            <div className="mt-3 text-2xl font-semibold text-vx-text num">{formatUsd(analytics.totalVolumeUsd)}</div>
+            <div className="mt-3 text-2xl font-semibold text-vx-text num">{formatUsd(deferredAnalytics.totalVolumeUsd)}</div>
           </div>
           <div className="card p-4">
             <div className="eyebrow">Rolling 7d</div>
-            <div className="mt-3 text-2xl font-semibold text-vx-text num">{formatUsd(analytics.rollingVolumeUsd)}</div>
+            <div className="mt-3 text-2xl font-semibold text-vx-text num">{formatUsd(deferredAnalytics.rollingVolumeUsd)}</div>
           </div>
           <div className="card p-4">
             <div className="eyebrow">Intents</div>
-            <div className="mt-3 text-2xl font-semibold text-vx-text num">{analytics.totalIntents}</div>
+            <div className="mt-3 text-2xl font-semibold text-vx-text num">{deferredAnalytics.totalIntents}</div>
           </div>
-          <div className="card p-4">
-            <div className="eyebrow">Avg. Intent</div>
-            <div className="mt-3 text-2xl font-semibold text-vx-text num">{formatUsd(analytics.averageVolumeUsd)}</div>
-          </div>
-        </div>
+          <div className
 
-        <div className="mt-8 grid gap-6 lg:grid-cols-[1.5fr_0.9fr]">
-          <div className="card p-5">
-            <div className="mb-4 flex items-center justify-between gap-4">
-              <div>
-                <div className="eyebrow">Volume over time</div>
-                <h2 className="mt-2 text-lg font-semibold text-vx-text">Daily tracked volume</h2>
-              </div>
-            </div>
-            <LineChart points={analytics.volumeOverTime} />
-          </div>
-
-          <div className="card p-5">
-            <div className="eyebrow">Status distribution</div>
-            <h2 className="mt-2 text-lg font-semibold text-vx-text">Intent lifecycle</h2>
-            <div className="mt-4">
-              <StatusBreakdown counts={statusEntries} />
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-8 grid gap-6 lg:grid-cols-2">
-          <div className="card p-5">
-            <div className="eyebrow">Source chain mix</div>
-            <h2 className="mt-2 text-lg font-semibold text-vx-text">Top source chains</h2>
-            <div className="mt-4">
-              <BarList
-                items={analytics.chainBreakdown}
-                formatLabel={(value) => chainMeta[value]?.name ?? value}
-                total={analytics.totalVolumeUsd}
-              />
-            </div>
-          </div>
-
-          <div className="card p-5">
-            <div className="eyebrow">Destination asset mix</div>
-            <h2 className="mt-2 text-lg font-semibold text-vx-text">Top destination tokens</h2>
-            <div className="mt-4">
-              <BarList items={analytics.destinationTokenBreakdown} total={analytics.totalVolumeUsd} />
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-8 card p-5">
-          <div className="eyebrow">Top routes</div>
-          <h2 className="mt-2 text-lg font-semibold text-vx-text">Chain → destination token pairs</h2>
-          <div className="mt-4 overflow-x-auto">
-            <table className="min-w-full text-left text-sm">
-              <thead className="text-vx-muted uppercase tracking-wide text-[10px]">
-                <tr>
-                  <th className="pb-3 pr-4">Route</th>
-                  <th className="pb-3 pr-4">Volume</th>
-                  <th className="pb-3 pr-4">Intents</th>
-                </tr>
-              </thead>
-              <tbody>
-                {analytics.routeBreakdown.map((route) => (
-                  <tr key={`${route.sourceChain}-${route.destinationToken}`} className="border-t border-vx-border/80 text-vx-text">
-                    <td className="py-3 pr-4">
-                      <div className="flex items-center gap-2">
-                        <span aria-hidden="true" className="h-2.5 w-2.5 rounded-full" style={{ background: route.color }} />
-                        <span>{chainMeta[route.sourceChain]?.name ?? route.sourceChain} → {route.destinationToken}</span>
-                      </div>
-                    </td>
-                    <td className="py-3 pr-4 num">{formatUsd(route.value)}</td>
-                    <td className="py-3 pr-4 num">{route.count}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </main>
-      <Footer />
-    </div>
-  );
-}
+/* … truncated 3519 chars — edit only what you need near the top … */
