@@ -1,5 +1,12 @@
 import { CHAINS, DST_TOKENS, SRC_TOKENS } from "@/lib/marketData";
 import type { FeedItem, IntentStatus } from "@/lib/types";
+import {
+  addUtcBucket,
+  autoGranularity,
+  startOfUtcBucket,
+  utcBucketKey,
+  type Granularity,
+} from "@/lib/time";
 
 export type AnalyticsBreakdownEntry = {
   label: string;
@@ -31,13 +38,20 @@ export type AnalyticsSummary = {
   destinationTokenBreakdown: AnalyticsBreakdownEntry[];
   routeBreakdown: AnalyticsRouteEntry[];
   volumeOverTime: AnalyticsVolumePoint[];
+  granularity: Granularity;
+  from: string;
+  to: string;
+  ignoredRows: number;
+};
+
+export type ComputeAnalyticsOptions = {
+  from: Date;
+  to: Date;
+  granularity: Granularity;
+  now: Date;
 };
 
 const STATUS_KEYS: IntentStatus[] = ["pending", "accepted", "filled", "failed"];
-
-function formatDayKey(value: string) {
-  return new Date(value).toISOString().slice(0, 10);
-}
 
 function getTokenPriceUsd(srcChain: string, tokenSymbol: string): number {
   const chainTokens = SRC_TOKENS[srcChain] ?? [];
@@ -54,7 +68,18 @@ function getChainColor(chainId: string): string {
   return CHAINS.find((chain) => chain.id === chainId)?.color ?? "#4CEBA8";
 }
 
-export function computeAnalytics(intents: FeedItem[]): AnalyticsSummary {
+/**
+ * Pure analytics computation. Time is injected via `options.now`; no Date.now()
+ * is called internally. Buckets are computed in UTC and empty buckets are
+ * filled with zeros. Rows with invalid timestamps are ignored and counted.
+ */
+export function computeAnalytics(
+  intents: FeedItem[],
+  options: ComputeAnalyticsOptions,
+): AnalyticsSummary {
+  const { from, to, now } = options;
+  const granularity = autoGranularity(from, to, options.granularity);
+
   const statusCounts: Record<IntentStatus, number> = {
     pending: 0,
     accepted: 0,
@@ -65,25 +90,36 @@ export function computeAnalytics(intents: FeedItem[]): AnalyticsSummary {
   const chainMap = new Map<string, number>();
   const destinationTokenMap = new Map<string, number>();
   const routeMap = new Map<string, { sourceChain: string; destinationToken: string; value: number; count: number; color: string }>();
-  const volumeByDay = new Map<string, number>();
-  const now = Date.now();
+  const volumeByBucket = new Map<string, number>();
+
+  const fromMs = from.getTime();
+  const toMs = to.getTime();
   const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+  const nowMs = now.getTime();
 
   let totalVolumeUsd = 0;
   let rollingVolumeUsd = 0;
+  let ignoredRows = 0;
 
   for (const intent of intents) {
+    const createdAtMs = new Date(intent.createdAt).getTime();
+    if (!Number.isFinite(createdAtMs)) {
+      ignoredRows += 1;
+      continue;
+    }
+
     const amount = Number.parseFloat(intent.srcAmount ?? "0");
     const tokenPriceUsd = getTokenPriceUsd(intent.srcChain, intent.srcToken);
     const volumeUsd = Number.isFinite(amount) ? amount * tokenPriceUsd : 0;
 
     totalVolumeUsd += volumeUsd;
 
-    const dayKey = formatDayKey(intent.createdAt);
-    volumeByDay.set(dayKey, (volumeByDay.get(dayKey) ?? 0) + volumeUsd);
+    if (createdAtMs >= fromMs && createdAtMs <= toMs) {
+      const bucketKey = utcBucketKey(new Date(createdAtMs), granularity);
+      volumeByBucket.set(bucketKey, (volumeByBucket.get(bucketKey) ?? 0) + volumeUsd);
+    }
 
-    const createdAtMs = new Date(intent.createdAt).getTime();
-    if (Number.isFinite(createdAtMs) && now - createdAtMs <= sevenDaysMs) {
+    if (nowMs - createdAtMs <= sevenDaysMs) {
       rollingVolumeUsd += volumeUsd;
     }
 
@@ -137,7 +173,7 @@ export function computeAnalytics(intents: FeedItem[]): AnalyticsSummary {
       color: entry.color,
     }));
 
-  const volumeOverTime = buildVolumeSeries(volumeByDay);
+  const volumeOverTime = buildVolumeSeries(volumeByBucket, from, to, granularity);
 
   return {
     totalIntents: intents.length,
@@ -149,27 +185,34 @@ export function computeAnalytics(intents: FeedItem[]): AnalyticsSummary {
     destinationTokenBreakdown,
     routeBreakdown,
     volumeOverTime,
+    granularity,
+    from: from.toISOString(),
+    to: to.toISOString(),
+    ignoredRows,
   };
 }
 
-function buildVolumeSeries(volumeByDay: Map<string, number>): AnalyticsVolumePoint[] {
-  const orderedDates = [...volumeByDay.keys()].sort();
-  if (orderedDates.length === 0) {
+function buildVolumeSeries(
+  volumeByBucket: Map<string, number>,
+  from: Date,
+  to: Date,
+  granularity: Granularity,
+): AnalyticsVolumePoint[] {
+  if (to.getTime() < from.getTime()) {
     return [];
   }
 
-  const earliest = new Date(orderedDates[0]!);
-  const latest = new Date(orderedDates[orderedDates.length - 1]!);
   const points: AnalyticsVolumePoint[] = [];
-  const cursor = new Date(earliest);
+  let cursor = startOfUtcBucket(from, granularity);
+  const end = to.getTime();
 
-  while (cursor <= latest) {
-    const dayKey = cursor.toISOString().slice(0, 10);
+  while (cursor.getTime() <= end) {
+    const key = utcBucketKey(cursor, granularity);
     points.push({
-      date: dayKey,
-      totalVolumeUsd: volumeByDay.get(dayKey) ?? 0,
+      date: key,
+      totalVolumeUsd: volumeByBucket.get(key) ?? 0,
     });
-    cursor.setUTCDate(cursor.getUTCDate() + 1);
+    cursor = addUtcBucket(cursor, granularity);
   }
 
   return points;
