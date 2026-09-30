@@ -34,6 +34,8 @@ registrations. Part of the multi-repo Vortex stack — see also
 | `/governance/[id]` | `src/app/governance/[id]/page.tsx` | Governance proposal detail view with wallet-gated comment discussion thread and, for minimum-bond proposals, an impact preview ("N of M current solvers would no longer qualify", from `src/lib/governanceImpact.ts`) |
 | `/requests` | `src/app/requests/page.tsx` | Community chain/token support requests: a connected wallet can request a chain or token (rejected with a clear message if it's already in `marketData.ts` or already requested) and upvote requests once each, sorted by upvotes. Backed by the in-memory mock `src/lib/supportRequestStore.ts` (same pattern as the governance mock store), so data resets on reload until a backend endpoint exists. A standalone route rather than a governance tab, because it's lightweight signal-gathering, not a parameter proposal with a vote |
 | `/contributors` | `src/app/contributors/page.tsx` | Drips Wave contribution transparency dashboard parsing repository issue metrics |
+| `/privacy` | `src/app/privacy/page.tsx` | Privacy & local-data center: inventory, export, clear, private mode |
+| `/api/contributors` | `src/app/api/contributors/route.ts` | Cached server-side proxy for GitHub contributors (1 h revalidate, stale-while-error) |
 
 ---
 
@@ -90,6 +92,12 @@ npm run dev    # http://localhost:3000
 | `NEXT_PUBLIC_SOLVER_REGISTRY_CONTRACT` | Solver registry contract ID from `vortex-contract` deployment |
 | `NEXT_PUBLIC_SITE_URL`                 | Canonical site origin, used for absolute Open Graph image URLs |
 | `NEXT_PUBLIC_SLASH_EVENTS_MOCK`        | Optional. `true` serves mock penalty events until the relay exposes `/slash-events` |
+
+Optional, **server-only** (never prefix with `NEXT_PUBLIC_`):
+
+| Variable       | Purpose |
+| -------------- | ------- |
+| `GITHUB_TOKEN` | Raises the GitHub API rate limit for `/api/contributors` (read-only, no scopes needed). Without it the route still works, and falls back to the last good response or a bundled snapshot when rate-limited. |
 
 ---
 

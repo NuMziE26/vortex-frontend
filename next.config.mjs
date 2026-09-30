@@ -59,6 +59,12 @@ const WS_ORIGIN = env.wsUrl ? new URL(env.wsUrl).origin : null;
  *
  * 5. `img-src 'self' data:`
  *    Next.js Image optimization and inline SVG data URIs both need `data:`.
+ *    Deliberately NOT widened for GitHub avatars (#479): /contributors renders
+ *    them through next/image, whose optimizer fetches from
+ *    avatars.githubusercontent.com server-side (see `images.remotePatterns`)
+ *    and serves the result from /_next/image — i.e. 'self'.  Likewise
+ *    `connect-src` is not widened for api.github.com: the browser calls the
+ *    same-origin /api/contributors route, which talks to GitHub server-side.
  */
 function buildCsp() {
   const connectSrc = [
@@ -118,6 +124,18 @@ const securityHeaders = [
 
 const nextConfig = {
   reactStrictMode: true,
+  images: {
+    // Locked-down allowlist: only GitHub avatars, only over HTTPS, only the
+    // /<login> path shape produced by avatarUrlFor() in src/lib/contributors.ts.
+    remotePatterns: [
+      {
+        protocol: "https",
+        hostname: "avatars.githubusercontent.com",
+        port: "",
+        pathname: "/*",
+      },
+    ],
+  },
   env: {
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000",
     NEXT_PUBLIC_WS_URL: process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:4000/ws",
