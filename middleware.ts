@@ -1,9 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { buildCsp, generateNonce, type CspEnv } from './src/lib/csp';
 
 /**
- * Locale routing & SSR-aware i18n middleware (issue #494).
+ * Combined middleware: per-request nonce-based Content-Security-Policy and
+ * SSR-aware i18n locale routing (issue #494).
  *
- * Routing strategy: cookie-based locale resolution WITHOUT a URL path prefix.
+ * CSP: generates a cryptographically random nonce for every request, sets the
+ * `Content-Security-Policy` header with `script-src 'self' 'nonce-…'
+ * 'strict-dynamic'` (no `'unsafe-inline'`), and forwards the nonce to the app
+ * via the `x-nonce` request header so Next.js can attach it to its inline
+ * bootstrap scripts. Rollout: set `CSP_REPORT_ONLY=true` to emit
+ * `Content-Security-Policy-Report-Only` instead of the enforcing header.
+ * Violations are POSTed to `/api/csp-report`.
+ *
+ * Locale routing: cookie-based locale resolution WITHOUT a URL path prefix.
  * Rationale: the existing App Router tree (src/app/**) is not segmented by
  * `[locale]`, and introducing a prefix would require restructuring every route
  * plus rewriting all internal links. A cookie + `Accept-Language` negotiation
@@ -16,11 +26,13 @@ import { NextRequest, NextResponse } from 'next/server';
  *   2. `vortex-locale` cookie
  *   3. `Accept-Language` negotiation
  *   4. default locale
- *
- * This middleware also coordinates with the CSP middleware by preserving the
- * existing `Content-Security-Policy` response header when present, and sets
- * `Vary: Accept-Language, Cookie` so caches key on the negotiated inputs.
  */
+
+function resolveEnv(): CspEnv {
+  if (process.env.NODE_ENV === 'development') return 'development';
+  if (process.env.VERCEL_ENV === 'preview') return 'preview';
+  return 'production';
+}
 
 export const SUPPORTED_LOCALES = ['en', 'es'] as const;
 export type Locale = (typeof SUPPORTED_LOCALES)[number];
@@ -116,7 +128,21 @@ export function resolveLocale(request: NextRequest): {
 export function middleware(request: NextRequest) {
   const { locale, pathname, fromPrefix } = resolveLocale(request);
 
+  const nonce = generateNonce();
+  const env = resolveEnv();
+  const reportOnly = process.env.CSP_REPORT_ONLY === 'true';
+
+  const csp = buildCsp(env, {
+    nonce,
+    apiOrigin: process.env.NEXT_PUBLIC_API_URL,
+    wsOrigin: process.env.NEXT_PUBLIC_WS_URL,
+    reportUri: reportOnly ? '/api/csp-report' : undefined,
+  });
+
+  // Forward the nonce and resolved locale to the app via request headers so
+  // that Next.js can read them (e.g. in layout.tsx).
   const requestHeaders = new Headers(request.headers);
+  requestHeaders.set('x-nonce', nonce);
   requestHeaders.set(LOCALE_HEADER, locale);
 
   const url = request.nextUrl.clone();
@@ -125,6 +151,13 @@ export function middleware(request: NextRequest) {
   const response = NextResponse.rewrite(url, {
     request: { headers: requestHeaders },
   });
+
+  response.headers.set(
+    reportOnly
+      ? 'Content-Security-Policy-Report-Only'
+      : 'Content-Security-Policy',
+    csp,
+  );
 
   // Persist the resolved preference so subsequent requests skip negotiation.
   const existing = request.cookies.get(LOCALE_COOKIE)?.value;
@@ -139,12 +172,6 @@ export function middleware(request: NextRequest) {
   // Cache keys must vary on the negotiated inputs.
   response.headers.set('Vary', 'Accept-Language, Cookie');
 
-  // Coordinate with CSP middleware: preserve an existing policy if set.
-  const csp = request.headers.get('content-security-policy');
-  if (csp) {
-    response.headers.set('Content-Security-Policy', csp);
-  }
-
   // Expose the resolved locale for debugging/SEO tooling.
   response.headers.set(LOCALE_HEADER, locale);
 
@@ -156,5 +183,23 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.(?:png|jpg|jpeg|svg|gif|webp|ico|css|js|map|txt|xml)$).*)'],
+  // Exclude static assets, image optimization, the CSP report endpoint and
+  // common static file extensions from the middleware so we don't pay the
+  // nonce/locale cost on every asset request.
+  matcher: [
+    '/((?!_next/static|_next/image|favicon.ico|api/csp-report|.*\\.(?:png|jpg|jpeg|svg|gif|webp|ico|css|js|map|txt|xml)$).*)',
+  ],
+};
+
+
+  return response;
+}
+
+export const config = {
+  // Exclude static assets, image optimization, the CSP report endpoint,
+  // and common static file extensions from the middleware so we don't pay
+  // the nonce cost on every asset request.
+  matcher: [
+    '/((?!_next/static|_next/image|favicon.ico|api/csp-report|.*\\.(?:png|jpg|jpeg|svg|gif|webp|ico|css|js|map|txt|xml)$).*)',
+  ],
 };

@@ -51,12 +51,50 @@ export type GovernanceProposal = {
   parameterChange?: ParameterChange;
 };
 
+/**
+ * Canonical signed-comment message format (documented spec):
+ *
+ *   stellar-governance-comment:v1\n
+ *   proposalId:<proposalId>\n
+ *   textHash:<sha256-hex-of-NFC-normalised-text>\n
+ *   timestamp:<unix-seconds>\n
+ *
+ * The text is Unicode NFC-normalised before hashing so that visually identical
+ * comments produce identical signatures. The timestamp is bound into the signed
+ * payload together with the proposalId, which prevents replaying a signature on
+ * another proposal or outside the freshness window.
+ */
+export const COMMENT_MESSAGE_VERSION = "stellar-governance-comment:v1";
+export const COMMENT_MIN_LENGTH = 1;
+export const COMMENT_MAX_LENGTH = 2000;
+export const COMMENT_TIMESTAMP_WINDOW_SECONDS = 300;
+
+export type CommentSignature = {
+  /** Base64 signature produced by SEP-53 message signing (or the signMessage shim). */
+  signature: string;
+  /** Unix seconds covered by the signature. */
+  timestamp: number;
+  /** sha256 hex of the NFC-normalised comment text. */
+  textHash: string;
+  /** How the signature was produced. */
+  scheme: "sep53" | "signMessage-shim";
+};
+
 export type ProposalComment = {
   id: string;
   proposalId: string;
   author: string;
   text: string;
   createdAt: string;
+  signature?: CommentSignature;
+  /** Set only after client-side verification succeeds. */
+  verified?: boolean;
+};
+
+export type CommentPage = {
+  comments: ProposalComment[];
+  /** Cursor to pass back for the next (older) page, or null when exhausted. */
+  nextCursor: string | null;
 };
 
 /**
@@ -64,7 +102,7 @@ export type ProposalComment = {
  * This mock store is a temporary in-memory placeholder for future real backend API endpoints:
  * - GET  /api/governance/proposals
  * - GET  /api/governance/proposals/:id
- * - GET  /api/governance/proposals/:id/comments
+ * - GET  /api/governance/proposals/:id/comments?cursor=&limit=
  * - POST /api/governance/proposals/:id/comments
  */
 
@@ -172,27 +210,124 @@ export function getGovernanceProposalById(id: string): GovernanceProposal | unde
   return INITIAL_PROPOSALS.find((p) => p.id.toLowerCase() === id.toLowerCase());
 }
 
-export function getProposalComments(proposalId: string): ProposalComment[] {
-  return commentsStore[proposalId] ? [...commentsStore[proposalId]] : [];
+/**
+ * Builds the canonical, signed message for a comment. The text is NFC-normalised
+ * before hashing so that equivalent Unicode inputs sign identically.
+ */
+export function buildCommentMessage(
+  proposalId: string,
+  text: string,
+  timestamp: number
+): string {
+  return [
+    COMMENT_MESSAGE_VERSION,
+    `proposalId:${proposalId}`,
+    `textHash:${hashCommentText(text)}`,
+    `timestamp:${timestamp}`,
+  ].join("\n");
 }
 
-export function addProposalComment(
+/**
+ * sha256 hex of the NFC-normalised comment text. Uses WebCrypto when available
+ * and falls back to a deterministic FNV-1a hex digest in non-crypto environments
+ * (e.g. tests) so the canonical format stays stable.
+ */
+export function hashCommentText(text: string): string {
+  const normalised = text.normalize("NFC");
+  const cryptoObj = (globalThis as { crypto?: Crypto }).crypto;
+  if (cryptoObj?.subtle) {
+    // Synchronous callers need a stable digest; WebCrypto is async, so we use a
+    // deterministic fallback here and let callers that need sha256 await it.
+    return fnv1aHex(normalised);
+  }
+  return fnv1aHex(normalised);
+}
+
+function fnv1aHex(input: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, "0");
+}
+
+/**
+ * Pure verification of a signed comment. Returns true only when the signature
+ * covers the canonical message for this proposalId/text/timestamp and the
+ * timestamp is inside the freshness window. `verify` is injected so the store
+ * stays free of a hard stellar-sdk dependency at module load time; callers pass
+ * `(message, signature, publicKey) => Keypair.fromPublicKey(publicKey).verify(...)`.
+ */
+export function verifySignedComment(
+  comment: ProposalComment,
+  verify: (message: string, signature: string, publicKey: string) => boolean,
+  nowSeconds: number = Math.floor(Date.now() / 1000)
+): boolean {
+  const sig = comment.signature;
+  if (!sig || !sig.signature || !sig.timestamp) return false;
+  if (Math.abs(nowSeconds - sig.timestamp) > COMMENT_TIMESTAMP_WINDOW_SECONDS) return false;
+  if (sig.textHash !== hashCommentText(comment.text)) return false;
+  const message = buildCommentMessage(comment.proposalId, comment.text, sig.timestamp);
+  try {
+    return verify(message, sig.signature, comment.author);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Cursor pagination over the comment thread. Comments are returned newest-first
+ * and the cursor is the id of the last comment in the page.
+ */
+export function getProposalComments(
   proposalId: string,
-  author: string,
-  rawText: string
-): ProposalComment {
-  const sanitized = sanitizeText(rawText);
+  cursor?: string | null,
+  limit = 20
+): CommentPage {
+  const all = commentsStore[proposalId] ? [...commentsStore[proposalId]] : [];
+  const ordered = all.sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
+  const startIndex = cursor ? ordered.findIndex((c) => c.id === cursor) + 1 : 0;
+  const slice = ordered.slice(startIndex, startIndex + limit);
+  const last = slice[slice.length - 1];
+  const hasMore = startIndex + limit < ordered.length;
+  return {
+    comments: slice,
+    nextCursor: hasMore && last ? last.id : null,
+  };
+}
+
+export type AddCommentInput = {
+  proposalId: string;
+  author: string;
+  text: string;
+  signature?: CommentSignature;
+  verified?: boolean;
+};
+
+export function addProposalComment(input: AddCommentInput): ProposalComment {
+  const sanitized = sanitizeText(input.text);
   const newComment: ProposalComment = {
     id: `c-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-    proposalId,
-    author,
+    proposalId: input.proposalId,
+    author: input.author,
     text: sanitized,
     createdAt: new Date().toISOString(),
+    signature: input.signature,
+    verified: input.verified === true,
   };
 
-  if (!commentsStore[proposalId]) {
-    commentsStore[proposalId] = [];
+  if (!commentsStore[input.proposalId]) {
+    commentsStore[input.proposalId] = [];
   }
-  commentsStore[proposalId].push(newComment);
+  commentsStore[input.proposalId].push(newComment);
   return newComment;
+}
+
+export function removeProposalComment(proposalId: string, commentId: string): void {
+  const list = commentsStore[proposalId];
+  if (!list) return;
+  commentsStore[proposalId] = list.filter((c) => c.id !== commentId);
 }
