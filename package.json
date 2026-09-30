@@ -17,6 +17,11 @@
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
     "check:i18n": "node scripts/check-i18n-parity.mjs",
+    "check:dependencies": "node scripts/check-dependencies.mjs",
+    "check:lockfile": "node scripts/lint-lockfile.mjs",
+    "check:provenance": "node scripts/verify-provenance.mjs",
+    "sbom": "node scripts/generate-sbom.mjs sbom.json",
+    "dependency-report": "node scripts/dependency-diff-report.mjs",
     "build:storybook": "storybook build --quiet",
     "test:storybook": "test-storybook --url http://127.0.0.1:6006",
     "prepare": "husky"
