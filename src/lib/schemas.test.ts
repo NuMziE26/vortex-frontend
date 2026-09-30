@@ -10,7 +10,6 @@ import {
   isSubmitIntentResponse,
   isRegisterSolverResponse,
   isSubmitRegistrationResponse,
-  ValidationError,
 } from "./schemas";
 
 describe("Schema Validators", () => {

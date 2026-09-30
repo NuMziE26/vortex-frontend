@@ -46,10 +46,10 @@ function formatDayKey(value: string) {
 function getTokenPriceUsd(srcChain: string, tokenSymbol: string): number {
   const chainTokens = SRC_TOKENS[srcChain] ?? [];
   const exactMatch = chainTokens.find((token) => token.symbol === tokenSymbol);
-  if (exactMatch) return exactMatch.priceUSD;
+  if (exactMatch) return exactMatch.priceUsd;
 
   const dstToken = DST_TOKENS.find((token) => token.symbol === tokenSymbol);
-  if (dstToken) return dstToken.priceUSD;
+  if (dstToken) return dstToken.priceUsd;
 
   return 1;
 }

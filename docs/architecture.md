@@ -55,8 +55,8 @@ submitIntent start ──► optimistic (pending) ──► REST/WS record ─�
 Optimistic entries are never persisted, are dropped on wallet account change,
 and are excluded from analytics and CSV exports.
 
-The WebSocket URL for all of these is
-`process.env.NEXT_PUBLIC_WS_URL`, and `useWebSocket(null)` is the deliberate way
+The WebSocket URL for all of these is `config.wsUrl` from `src/lib/config.ts`
+(`NEXT_PUBLIC_WS_URL`, or `null` when unset), and `useWebSocket(null)` is the deliberate way
 to stay idle (e.g. when that env var is unset) — it tears down any existing
 connection and reports `status: "closed"` without attempting to connect.
 
@@ -162,3 +162,31 @@ no context provider wrapping them. The only two places mounted unconditionally
 are [`WalletHydrator`](../src/components/WalletHydrator.tsx) and
 [`ToastViewport`](../src/components/ToastViewport.tsx), both mounted once in
 [`src/app/layout.tsx`](../src/app/layout.tsx).
+
+## Internationalisation
+
+There is one translation system: `src/lib/i18n`.
+
+- **Catalogs:** one per locale in `src/lib/i18n/messages/` (`en.ts` is the
+  source of truth, `es.ts` must have exactly the same keys). Keys are
+  namespaced by feature (`swap.*`, `solve.*`, `governance.*`, …) and values may
+  contain `{placeholder}` tokens, which must match across locales.
+- **Client components:** `const { t } = useTranslation()` from
+  `src/lib/i18n/I18nProvider.tsx`. The locale is switched from `SettingsPanel`
+  and every component re-renders in it.
+- **Server components:** `getTranslation()` from `src/lib/i18n/server.ts`
+  (e.g. `layout.tsx`, the dynamic-import fallbacks in `page.tsx` files).
+- **Keys are literals or typed maps.** `t("swap.submit.cta")`, or a
+  `Record<Status, MessageKey>` lookup; never `t(\`prefix.${value}\`)`, which
+  can't be checked statically.
+
+`npm run check:i18n` (`scripts/check-i18n-parity.mjs`, run in CI) fails on
+missing or extra keys, mismatched placeholders, unknown or template-built keys,
+and hard-coded user-facing text in JSX under `src/app/**` and
+`src/components/**` (JSX text and `aria-label` / `title` / `placeholder` /
+`alt` strings). Brand names and symbols that stay the same in every language
+go in `scripts/i18n-literal-allowlist.json`; everything else goes in the
+catalogs. `src/lib/i18n/pages.es.test.tsx` renders the routed pages under `es`.
+
+Adding a string: add the key to `en.ts` **and** `es.ts`, then use `t()`.
+Adding a locale is a separate change (new catalog file plus `CATALOGS`).

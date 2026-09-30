@@ -156,24 +156,11 @@ enforcePublicEnvValidation(process.env);
 
 ### Build Integration
 
-The validation can be integrated into the build process by calling `enforcePublicEnvValidation()` in:
-
-- Pre-build scripts
-- Next.js config hooks
-- CI/CD pipelines
-- Pre-commit hooks
-
-### Example: next.config.js
-
-```javascript
-const { enforcePublicEnvValidation } = require('./src/lib/envValidation');
-
-enforcePublicEnvValidation(process.env);
-
-module.exports = {
-  // ... rest of Next.js config
-};
-```
+The same patterns (`SUSPICIOUS_PATTERNS` in `src/lib/env-schema.mjs`) are checked
+by `scripts/check-env-vars.mjs`, which runs on `npm run check:env` in CI and at
+the start of every `npm run build`. A `NEXT_PUBLIC_*` variable whose name
+matches one of them fails the build. See `docs/configuration.md` for the full
+set of environment checks.
 
 ## Test Coverage
 

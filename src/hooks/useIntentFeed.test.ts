@@ -94,7 +94,6 @@ describe("useIntentFeed", () => {
   });
 
   it("caps out-of-range overflow at the max item count, keeping the newest items", () => {
-    const base = seedItems[0]!;
     const overflowSeed: FeedItem[] = Array.from({ length: 10 }, (_, i) => ({
       ...seedItems[0]!,
       id: `seed-${i}`,

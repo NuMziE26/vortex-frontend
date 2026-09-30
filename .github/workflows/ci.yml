@@ -36,11 +36,14 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
           GITHUB_ACTOR: ${{ github.actor }}
       - run: npm ci
+      - run: npm run check:manifest
       - run: npm run check:env
       - run: npm run check:i18n
       - run: npm run check:orphan-tests
       - run: npm run check:docs
       - run: npm run check:dead-code
+      - name: Typecheck (strict tsconfig, must be zero errors)
+        run: npm run typecheck
       - run: npm run lint
       - run: npm test
       - run: npm run test:coverage
@@ -59,6 +62,8 @@ jobs:
           name: coverage-report
           path: coverage/
       - run: npx playwright install --with-deps
+      - name: Check the e2e suite resolves
+        run: npm run test:e2e -- --list
       - run: npm run test:e2e
       - uses: actions/upload-artifact@v7
         if: always()

@@ -171,18 +171,15 @@ export function parseIssuesMarkdown(markdown: string): WaveMetrics {
     }
 
     // Category summary
-    if (!categoryMap[issue.category]) {
-      categoryMap[issue.category] = {
-        category: issue.category,
-        total: 0,
-        completed: 0,
-        inProgress: 0,
-        open: 0,
-        totalPoints: 0,
-        earnedPoints: 0,
-      };
-    }
-    const cat = categoryMap[issue.category];
+    const cat = (categoryMap[issue.category] ??= {
+      category: issue.category,
+      total: 0,
+      completed: 0,
+      inProgress: 0,
+      open: 0,
+      totalPoints: 0,
+      earnedPoints: 0,
+    });
     cat.total++;
     cat.totalPoints += issue.points;
     if (issue.status === "Completed") {
@@ -203,15 +200,13 @@ export function parseIssuesMarkdown(markdown: string): WaveMetrics {
 
     // Contributor leaderboard summary
     if (issue.contributor && issue.status === "Completed") {
-      if (!contributorMap[issue.contributor]) {
-        contributorMap[issue.contributor] = {
-          contributor: issue.contributor,
-          completedCount: 0,
-          pointsEarned: 0,
-        };
-      }
-      contributorMap[issue.contributor].completedCount++;
-      contributorMap[issue.contributor].pointsEarned += issue.points;
+      const tally = (contributorMap[issue.contributor] ??= {
+        contributor: issue.contributor,
+        completedCount: 0,
+        pointsEarned: 0,
+      });
+      tally.completedCount++;
+      tally.pointsEarned += issue.points;
     }
   }
 

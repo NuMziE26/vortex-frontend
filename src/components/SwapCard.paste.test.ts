@@ -7,9 +7,7 @@
  * 4. Typed input doesn't trigger paste confirmation
  */
 
-import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { describe, it, expect } from "vitest";
 
 /**
  * Helper to simulate paste event

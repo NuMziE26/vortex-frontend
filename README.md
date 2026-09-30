@@ -88,6 +88,7 @@ npm run dev    # http://localhost:3000
 | `NEXT_PUBLIC_NETWORK`                  | Stellar network: `testnet`, `futurenet`, or `mainnet`         |
 | `NEXT_PUBLIC_SETTLEMENT_CONTRACT`      | Settlement contract ID from `vortex-contract` deployment      |
 | `NEXT_PUBLIC_SOLVER_REGISTRY_CONTRACT` | Solver registry contract ID from `vortex-contract` deployment |
+| `NEXT_PUBLIC_SITE_URL`                 | Canonical site origin, used for absolute Open Graph image URLs |
 | `NEXT_PUBLIC_SLASH_EVENTS_MOCK`        | Optional. `true` serves mock penalty events until the relay exposes `/slash-events` |
 
 ---
@@ -161,10 +162,17 @@ If preview-specific variables are not set, the workflow uses sensible defaults p
 | `npm run start`              | Serve production build locally                                    |
 | `npm run lint`               | Run ESLint across codebase                                        |
 | `npm run check:editorconfig` | Verify formatting consistency with `.editorconfig`                |
-| `npm run check:env`          | Validate that all referenced environment variables are documented |
+| `npm run check:env`          | Check env vars, `.env.example` and this README against `src/lib/env-schema.mjs` |
+| `npm run check:i18n`         | Check locale catalogs, `t()` keys and hard-coded JSX text (see docs/architecture.md) |
+| `npm run check:manifest`     | Fail on duplicate `package.json` keys or npm scripts that are referenced but not defined |
 | `npm run typecheck`          | Run strict TypeScript typechecking (`tsc --noEmit`)               |
 | `npm test`                   | Run the Vitest test suite                                         |
 | `npm run test:coverage`      | Run tests with V8 coverage reports                                |
+| `npm run test:e2e`           | Run the Playwright end-to-end suite (`e2e/`)                      |
+| `npm run storybook`          | Start Storybook on http://localhost:6006                          |
+| `npm run build:storybook`    | Build the static Storybook into `storybook-static/`               |
+| `npm run test:visual`        | Run the Storybook visual regression specs (`.storybook/playwright/`) |
+| `npm run changelog`          | Prepend the unreleased changes to `CHANGELOG.md`                  |
 
 ---
 

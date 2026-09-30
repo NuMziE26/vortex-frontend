@@ -2,13 +2,8 @@
   "extends": "next/core-web-vitals",
   "overrides": [
     {
-      "files": [
-        "src/lib/decimal.ts",
-        "src/lib/format.ts",
-        "src/lib/analytics.ts",
-        "src/lib/xdrReview.ts",
-        "src/components/SwapCard.tsx"
-      ],
+      "files": ["src/**/*.{ts,tsx,js,jsx,mjs}"],
+      "excludedFiles": ["src/lib/config.ts", "src/lib/env-schema.mjs", "**/*.test.*"],
       "rules": {
         "no-restricted-globals": [
           "error",
@@ -19,6 +14,11 @@
         ],
         "no-restricted-properties": [
           "error",
+          {
+            "object": "process",
+            "property": "env",
+            "message": "Read configuration from `config` in src/lib/config.ts (see docs/configuration.md)."
+          },
           {
             "object": "Number",
             "property": "parseFloat",

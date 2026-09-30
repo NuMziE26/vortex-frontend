@@ -25,7 +25,7 @@ mutateMock.mockImplementation(async (key: string, updater?: unknown, opts?: Reco
   if (typeof updater !== "function") return current;
 
   if (opts && "optimisticData" in opts) {
-    const optimisticData = opts.optimisticData as unknown;
+    const optimisticData = opts["optimisticData"] as unknown;
     const next = typeof optimisticData === "function" ? (optimisticData as (c: unknown) => unknown)(current) : optimisticData;
     openIntentsStore.set(key, next);
   }
@@ -35,7 +35,7 @@ mutateMock.mockImplementation(async (key: string, updater?: unknown, opts?: Reco
     openIntentsStore.set(key, result);
     return result;
   } catch (err) {
-    if (opts?.rollbackOnError) {
+    if (opts?.["rollbackOnError"]) {
       openIntentsStore.set(key, current);
     }
     throw err;
