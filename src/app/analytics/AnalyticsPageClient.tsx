@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Footer } from "@/components/Footer";
 import { Nav } from "@/components/Nav";
 import { useLiveIntents } from "@/hooks/useLiveIntents";
@@ -8,6 +8,7 @@ import {
   computeAnalytics,
   getStatusDistributionEntries,
   SLA_THRESHOLDS,
+  type AnalyticsResult,
   type KpiCard,
   type KpiDeltaState,
   type SankeyData,
@@ -387,6 +388,60 @@ function StatusBreakdown({
       ))}
     </div>
   );
+}
+
+/**
+ * Drives analytics from a Web Worker when available, falling back to a
+ * synchronous recompute on the main thread (SSR, tests, old browsers).
+ * The worker keeps an incremental aggregator alive and streams snapshots
+ * back, so the main thread only ever renders precomputed results.
+ */
+function useAnalyticsWorker(intents: Parameters<typeof computeAnalytics>[0]) {
+  const [snapshot, setSnapshot] = useState<AnalyticsResult | null>(null);
+  const workerRef = useRef<Worker | null>(null);
+  const initializedRef = useRef(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof Worker === "undefined") {
+      return;
+    }
+
+    let worker: Worker;
+    try {
+      worker = new Worker(new URL("../../lib/analytics/worker.ts", import.meta.url), { type: "module" });
+    } catch {
+      return;
+    }
+
+    workerRef.current = worker;
+    worker.onmessage = (event: MessageEvent<{ type: string; snapshot?: AnalyticsResult }>) => {
+      if (event.data?.type === "snapshot" && event.data.snapshot) {
+        setSnapshot(event.data.snapshot);
+      }
+    };
+
+    return () => {
+      worker.terminate();
+      workerRef.current = null;
+      initializedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const worker = workerRef.current;
+    if (!worker) {
+      return;
+    }
+
+    if (!initializedRef.current) {
+      initializedRef.current = true;
+      worker.postMessage({ type: "init", intents });
+    } else {
+      worker.postMessage({ type: "apply", delta: { type: "replace", intents } });
+    }
+  }, [intents]);
+
+  return snapshot;
 }
 
 // ─── SLA Panel (issue #465) ───────────────────────────────────────────────────
@@ -819,10 +874,28 @@ export default function AnalyticsPageClient() {
   const { intents, isLoading, error } = useLiveIntents();
   const chartRef = useRef<HTMLDivElement>(null);
 
-  const analytics = useMemo(() => computeAnalytics(intents), [intents]);
+  const workerSnapshot = useAnalyticsWorker(intents);
+  const fallbackAnalytics = useMemo(
+    () => (workerSnapshot ? null : computeAnalytics(intents)),
+    [workerSnapshot, intents],
+  );
+  const analytics = workerSnapshot ?? fallbackAnalytics!;
+  const deferredAnalytics = useDeferredValue(ana
+export default function AnalyticsPageClient() {
+  const { t } = useTranslation();
+  const { intents, isLoading, error } = useLiveIntents();
+  const chartRef = useRef<HTMLDivElement>(null);
+
+  const workerSnapshot = useAnalyticsWorker(intents);
+  const fallbackAnalytics = useMemo(
+    () => (workerSnapshot ? null : computeAnalytics(intents)),
+    [workerSnapshot, intents],
+  );
+  const analytics = workerSnapshot ?? fallbackAnalytics!;
+  const deferredAnalytics = useDeferredValue(analytics);
   const statusEntries = useMemo(
-    () => getStatusDistributionEntries(analytics.statusCounts),
-    [analytics.statusCounts],
+    () => getStatusDistributionEntries(deferredAnalytics.statusCounts),
+    [deferredAnalytics.statusCounts],
   );
 
   const chainMeta = useMemo(
