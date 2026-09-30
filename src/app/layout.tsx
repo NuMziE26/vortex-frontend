@@ -4,6 +4,7 @@ import "./globals.css";
 import { WalletHydrator } from "@/components/WalletHydrator";
 import { ToastViewport } from "@/components/ToastViewport";
 import { IntentStatusWatcher } from "@/components/IntentStatusWatcher";
+import { OriginTrustBanner } from "@/components/OriginTrustBanner";
 import { I18nProvider } from "@/lib/i18n/I18nProvider";
 import { DEFAULT_LOCALE, LOCALE_HEADER, isLocale, type Locale } from "@/lib/i18n";
 
@@ -168,6 +169,7 @@ export default async function RootLayout({
           <CommandPalette />
           <ToastViewport />
           <ConnectivityBanner />
+          <OriginTrustBanner />
         </I18nProvider>
       </body>
     </html>
