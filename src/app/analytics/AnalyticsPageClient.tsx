@@ -7,7 +7,14 @@ import { useLiveIntents } from "@/hooks/useLiveIntents";
 import {
   computeAnalytics,
   getStatusDistributionEntries,
+  computeShareSeries,
+  computeConcentration,
+  computeTopMovers,
   SLA_THRESHOLDS,
+  type ShareDimension,
+  type ShareSeriesPoint,
+  type TopMover,
+  type ConcentrationResult,
   type AnalyticsResult,
   type KpiCard,
   type KpiDeltaState,
@@ -20,6 +27,7 @@ import { downloadBlob, svgToPng } from "@/lib/export/svgToPng";
 import { downloadCsv } from "@/lib/csv";
 import { secureLogger } from "@/lib/secureLogging";
 import { useTranslation } from "@/lib/i18n/I18nProvider";
+import { Tooltip } from "@/components/Tooltip";
 
 // ─── Inline format helper ─────────────────────────────────────────────────────
 
@@ -1149,6 +1157,72 @@ export default function AnalyticsPageClient() {
           </div>
         </div>
 
+        {/* ── Issue #468: Market-share trends ────────────────────────────── */}
+        <div className="mt-8 card p-5">
+          <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <div className="eyebrow">Market share trends</div>
+              <h2 className="mt-2 text-lg font-semibold text-vx-text">Share over time</h2>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Dimension selector */}
+              {(["srcChain", "dstToken", "solver"] as ShareDimension[]).map((dim) => (
+                <button
+                  key={dim}
+                  type="button"
+                  onClick={() => setDimension(dim)}
+                  className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${
+                    dimension === dim
+                      ? "bg-vx-sage-bg text-vx-sage border border-vx-sage/30"
+                      : "bg-vx-surface/50 text-vx-muted border border-vx-border hover:text-vx-text"
+                  }`}
+                  aria-pressed={dimension === dim}
+                >
+                  {dim === "srcChain" ? "Source Chain" : dim === "dstToken" ? "Dest Token" : "Solver"}
+                </button>
+              ))}
+              {/* Normalise toggle */}
+              <button
+                type="button"
+                onClick={() => setNormalized((v) => !v)}
+                className={`px-3 py-1 rounded-lg text-xs font-semibold border transition-colors ${
+                  normalized
+                    ? "bg-vx-sage-bg text-vx-sage border border-vx-sage/30"
+                    : "bg-vx-surface/50 text-vx-muted border border-vx-border hover:text-vx-text"
+                }`}
+                aria-pressed={normalized}
+              >
+                100% normalised
+              </button>
+            </div>
+          </div>
+          <StackedAreaChart
+            seriesData={shareSeries.series}
+            entities={shareSeries.entities}
+            colors={shareSeries.colors}
+            normalized={normalized}
+          />
+        </div>
+
+        {/* ── Issue #468: Top movers + Concentration ──────────────────────── */}
+        <div className="mt-8 grid gap-6 lg:grid-cols-2">
+          <div className="card p-5">
+            <div className="eyebrow">Top movers (7d vs previous 7d)</div>
+            <h2 className="mt-2 text-lg font-semibold text-vx-text">Largest share shifts</h2>
+            <div className="mt-4">
+              <TopMoversPanel movers={topMovers} />
+            </div>
+          </div>
+
+          <div className="card p-5">
+            <div className="eyebrow">Solver concentration</div>
+            <h2 className="mt-2 text-lg font-semibold text-vx-text">HHI & top-1/top-3 share</h2>
+            <div className="mt-4">
+              <ConcentrationIndicator result={concentration} />
+            </div>
+          </div>
+        </div>
+
         {/* Fill-time / SLA panel (issue #465) */}
         <div className="mt-8 card p-5">
           <div className="eyebrow">Fill-time &amp; SLA</div>
@@ -1160,6 +1234,8 @@ export default function AnalyticsPageClient() {
           </p>
           <div className="mt-4">
             <SlaPanel data={analytics.slaPanel} />
+          </div>
+        </div>
           </div>
         </div>
       </main>
