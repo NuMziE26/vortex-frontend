@@ -1,0 +1,175 @@
+import type { Metadata, Viewport } from "next";
+import { headers } from "next/headers";
+import "./globals.css";
+import { WalletHydrator } from "@/components/WalletHydrator";
+import { ToastViewport } from "@/components/ToastViewport";
+import { IntentStatusWatcher } from "@/components/IntentStatusWatcher";
+import { I18nProvider } from "@/lib/i18n/I18nProvider";
+import { DEFAULT_LOCALE, LOCALE_HEADER, isLocale, type Locale } from "@/lib/i18n";
+
+const TITLE = "Vortex | Cross-chain Swaps via Stellar";
+const DESCRIPTION =
+  "Swap any token from any chain directly to Stellar. Intent-based cross-chain liquidity protocol — no bridges, no wrapped tokens.";
+
+// The canonical site URL — used in absolute OG image URLs.
+// Falls back to localhost for local dev; set NEXT_PUBLIC_SITE_URL in production.
+const SITE_URL =
+  process.env["NEXT_PUBLIC_SITE_URL"]?.replace(/\/$/, "") ??
+  "http://localhost:3000";
+
+// Storage key shared with the theme setting in SettingsPanel and the
+// no-flash bootstrap script below. Kept in sync with src/lib/theme.ts.
+const THEME_STORAGE_KEY = "vortex:theme";
+
+// Inline, render-blocking script that resolves the effective theme and sets
+// `data-theme` on <html> before first paint, preventing a flash of the wrong
+// theme (FOUC). It is CSP-nonce compatible: when a nonce is provided via the
+// `x-nonce` request header it is attached to the <script> tag. All storage
+// access is wrapped in try/catch so blocked storage (private mode, disabled
+// cookies) falls back safely to the system preference.
+const THEME_BOOTSTRAP_SCRIPT = `(function(){try{var k=${JSON.stringify(
+  THEME_STORAGE_KEY,
+)};var p=null;try{p=localStorage.getItem(k);}catch(e){}if(p!=="light"&&p!=="dark"&&p!=="system"){p="system";}var d=p==="dark"||(p==="system"&&window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches);var t=d?"dark":"light";var r=document.documentElement;r.setAttribute("data-theme",t);r.style.colorScheme=t;}catch(e){}})();`;
+
+// Locales that render right-to-left. Kept local so adding an RTL locale only
+// requires extending this set (no new locales are added by this issue).
+const RTL_LOCALES = new Set<string>(["ar", "he", "fa", "ur"]);
+
+// Resolve the request locale server-side. Middleware sets the `x-vortex-locale`
+// header after applying the resolution order (URL prefix / ?lang= → cookie →
+// Accept-Language → default). Reading it here means <html lang>/<dir> and the
+// I18nProvider are correct during SSR, so there is no flash of English.
+async function resolveRequestLocale(): Promise<Locale> {
+  try {
+    const headerList = await headers();
+    const value = headerList.get(LOCALE_HEADER);
+    if (value && isLocale(value)) return value;
+  } catch {
+    // headers() is unavailable in some static contexts — fall back safely.
+  }
+  return DEFAULT_LOCALE;
+}
+
+export const metadata: Metadata = {
+  title: { default: TITLE, template: "%s | Vortex" },
+  description: DESCRIPTION,
+  keywords: [
+    "stellar",
+    "cross-chain",
+    "bridge",
+    "swap",
+    "intents",
+    "defi",
+    "soroban",
+  ],
+
+  // ── Canonical + hreflang alternates ──────────────────────────────────────────
+  // Locale is resolved per-request (cookie/header/prefix), so the canonical URL
+  // is the clean path and each supported locale is advertised as an alternate.
+  alternates: {
+    canonical: "/",
+    languages: {
+      en: "/",
+      es: "/?lang=es",
+      "x-default": "/",
+    },
+  },
+
+  // ── Favicon set ──────────────────────────────────────────────────────────────
+  // Two SVG variants: dark background for dark browser chrome (prefers dark),
+  // light background for light browser chrome (prefers light).
+  // Next.js App Router picks up src/app/icon.svg automatically, but we need
+  // the media-query variants registered here so browsers receive both.
+  icons: {
+    icon: [
+      {
+        // Dark browser chrome (OS in dark mode) — dark icon looks crisp
+        url: "/icon-dark.svg",
+        type: "image/svg+xml",
+        media: "(prefers-color-scheme: dark)",
+      },
+      {
+        // Light browser chrome (OS in light mode) — light-bg icon stands out
+        url: "/icon-light.svg",
+        type: "image/svg+xml",
+        media: "(prefers-color-scheme: light)",
+      },
+      // Fallback for browsers that don't support the media attribute
+      { url: "/icon.svg", type: "image/svg+xml" },
+    ],
+  },
+
+  // ── Open Graph ───────────────────────────────────────────────────────────────
+  openGraph: {
+    title: TITLE,
+    description: DESCRIPTION,
+    siteName: "Vortex",
+    type: "website",
+    url: SITE_URL,
+    images: [
+      {
+        // Next.js generates this from src/app/opengraph-image.tsx at build time
+        url: `${SITE_URL}/opengraph-image`,
+        width: 1200,
+        height: 630,
+        alt: "Vortex — Cross-chain Swaps via Stellar",
+      },
+    ],
+  },
+
+  // ── Twitter / X ──────────────────────────────────────────────────────────────
+  twitter: {
+    card: "summary_large_image",
+    title: TITLE,
+    description: DESCRIPTION,
+    images: [`${SITE_URL}/opengraph-image`],
+  },
+};
+
+export const viewport: Viewport = {
+  // Dark-navy theme colour — used by Chrome on Android and Safari on iOS
+  // for the browser chrome surrounding the page. The effective theme is
+  // resolved client-side (see ThemeColorSync) so the meta tag follows the
+  // user's explicit Light/Dark/System preference, not just the OS setting.
+  themeColor: [
+    { media: "(prefers-color-scheme: dark)", color: "#080C14" },
+    { media: "(prefers-color-scheme: light)", color: "#FFFFFF" },
+  ],
+};
+
+export default async function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const locale = await resolveRequestLocale();
+  const dir = RTL_LOCALES.has(locale) ? "rtl" : "ltr";
+
+  return (
+    <html lang={locale} dir={dir} suppressHydrationWarning>
+      <head>
+        <script
+          // Blocking, before-paint theme resolution to avoid FOUC.
+          dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP_SCRIPT }}
+        />
+      </head>
+      <body className="antialiased">
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[200] focus:px-3 focus:py-2 focus:rounded-lg focus:bg-vx-card focus:text-vx-text focus:border focus:border-vx-sage/40"
+        >
+          Skip to main content
+        </a>
+        <I18nProvider locale={locale}>
+          <GlobalErrorCapture />
+          <WalletHydrator />
+          <IntentStatusWatcher />
+          {children}
+          <CommandPalette />
+          <ToastViewport />
+          <ConnectivityBanner />
+        </I18nProvider>
+      </body>
+    </html>
+  );
+}
