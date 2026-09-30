@@ -6,8 +6,9 @@ const fetcher = endpoint(solverSchema);
 import type { Solver } from "@/lib/types";
 
 export function useSolver(address: string | null) {
+  const encodedAddress = address ? encodeURIComponent(address) : null;
   const { data, error, isLoading } = useSWR<Solver>(
-    address ? `/solvers/${address}` : null,
+    encodedAddress ? `/solvers/${encodedAddress}` : null,
     fetcher,
   );
 
