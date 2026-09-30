@@ -25,6 +25,20 @@ export const LOCALE_DIRECTIONS: Record<Locale, "ltr" | "rtl"> = {
   es: "ltr",
 };
 
+/** Locales written right-to-left. Used to set `dir` on <html> and to mirror UI. */
+export const RTL_LOCALES: readonly Locale[] = LOCALES.filter(
+  (locale) => LOCALE_DIRECTIONS[locale] === "rtl",
+);
+
+export function isRtlLocale(locale: Locale): boolean {
+  return RTL_LOCALES.includes(locale);
+}
+
+/** Returns the writing direction for a locale, for use on <html dir="...">. */
+export function getDirection(locale: Locale): "ltr" | "rtl" {
+  return LOCALE_DIRECTIONS[locale] ?? (isRtlLocale(locale) ? "rtl" : "ltr");
+}
+
 export function isLocale(value: string): value is Locale {
   return value in CATALOGS;
 }
