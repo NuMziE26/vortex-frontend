@@ -13,6 +13,11 @@ import { useTranslation } from "@/lib/i18n/I18nProvider";
  * persistent, accessible banner while the user is offline and automatically
  * dismisses it a moment after connectivity is restored.
  *
+ * When offline, the banner also surfaces the timestamp of the last successful
+ * data refresh (published by the service worker / data layer via the
+ * `vx:last-updated` window event) so users know how stale the cached feed is.
+ * Submissions are blocked while offline — the banner makes that explicit.
+ *
  * The banner is dismissed automatically on reconnect (after a brief grace
  * period) and does NOT need a manual close button in the offline state — the
  * act of coming back online is the dismissal signal.
@@ -25,8 +30,23 @@ export function ConnectivityBanner() {
   const { t } = useTranslation();
   const { connectivity } = useConnectivity();
   const [visible, setVisible] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const announce = useAnnounce();
+
+  // Track the last successful data refresh so the offline banner can show
+  // "offline — last updated X". The service worker / data layer dispatches
+  // `vx:last-updated` with a `detail.timestamp` (ms since epoch).
+  useEffect(() => {
+    const onLastUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ timestamp?: number }>).detail;
+      if (detail && typeof detail.timestamp === "number") {
+        setLastUpdated(detail.timestamp);
+      }
+    };
+    window.addEventListener("vx:last-updated", onLastUpdated);
+    return () => window.removeEventListener("vx:last-updated", onLastUpdated);
+  }, []);
 
   useEffect(() => {
     if (connectivity === "offline") {
@@ -66,6 +86,14 @@ export function ConnectivityBanner() {
 
   const isOffline = connectivity === "offline";
 
+  const lastUpdatedLabel =
+    lastUpdated !== null
+      ? new Date(lastUpdated).toLocaleTimeString(undefined, {
+          hour: "2-digit",
+          minute: "2-digit",
+        })
+      : null;
+
   return (
     <div
       role="status"
@@ -97,7 +125,11 @@ export function ConnectivityBanner() {
               strokeLinejoin="round"
             />
           </svg>
-          <span>{t("connectivity.offline")}</span>
+          <span>
+            {lastUpdatedLabel
+              ? t("connectivity.offlineWithTimestamp", { timestamp: lastUpdatedLabel })
+              : t("connectivity.offline")}
+          </span>
         </>
       ) : (
         <>
